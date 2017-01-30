@@ -1,0 +1,134 @@
+# This file is part of the Transient Recorder Framework.
+# It is subject to the license terms in the LICENSE.txt file found in the
+# top-level directory of this distribution and at
+# https://confluence.slac.stanford.edu/display/ppareg/LICENSE.html. No part
+# of the Transient Recorder Framework, including this file, may be copied,
+# modified, propagated, or distributed except according to the terms
+# contained in the LICENSE.txt file.
+
+
+# This template is for generic asynchronous requests handled
+# by drivers. The assumption is that there is a single asyn
+# parameter used both to start the request and to wait for and
+# determine its result (success or failure).
+# The Transient Recorder framework does not provide any C++ code
+# to assist with implementing such requests, but nevertheless
+# having a generic DB template is useful.
+
+# Macros:
+#   PREFIX  - prefix of records (: is implied)
+#   PORT    - asyn port name where the parameter resides
+#   REQUEST - name of the request, for the record names
+#             and the asyn parameter name
+
+
+# These internal records connect to the asyn parameter.
+record(bo, "$(PREFIX):_START_$(REQUEST)") {
+    field(DTYP, "asynInt32")
+    field(OUT,  "@asyn($(PORT),0,0)$(REQUEST)")
+    field(ONAM, "Start")
+}
+record(ai, "$(PREFIX):_MONITOR_$(REQUEST)_STATE") {
+    field(SCAN, "I/O Intr")
+    field(DTYP, "asynInt32")
+    field(INP,  "@asyn($(PORT),0,0)$(REQUEST)")
+    field(MDEL, "NAN") # force monitor event on each process
+}
+record(mbbi, "$(PREFIX):_GET_$(REQUEST)_STATE") {
+    field(DTYP, "asynInt32")
+    field(INP,  "@asyn($(PORT),0,0)$(REQUEST)")
+    field(ZRST, "failed")
+    field(ZRVL, "0")
+    field(ONST, "succeeded")
+    field(ONVL, "1")
+    field(TWST, "running")
+    field(TWVL, "2")
+}
+
+# The current status of the request.
+record(mbbi, "$(PREFIX):$(REQUEST)_STATUS") {
+    field(VAL,  "0")
+    field(PINI, "YES")
+    field(ZRST, "")
+    field(ONST, "running")
+    field(TWST, "success")
+    field(THST, "fail")
+}
+
+# Writing 1 to this record starts the request.
+record(bo, "$(PREFIX):START_$(REQUEST)") {
+    field(ONAM, "Start")
+    field(FLNK, "$(PREFIX):_start_$(REQUEST)_check")
+}
+
+# If 1 was not written or the request is already running,
+# ignore request (EDM writes 0 when the button is released).
+# Otherwise accept request and start it.
+record(fanout, "$(PREFIX):_start_$(REQUEST)_check") {
+    field(SELM, "Specified")
+    field(SELL, "$(PREFIX):_check_$(REQUEST) PP")
+    field(LNK1, "$(PREFIX):_accept_$(REQUEST)")
+}
+record(calc, "$(PREFIX):_check_$(REQUEST)") {
+    field(INPA, "$(PREFIX):START_$(REQUEST)")
+    field(INPB, "$(PREFIX):$(REQUEST)_STATUS")
+    field(CALC, "(A!=1||B==1)?0:1")
+}
+record(dfanout, "$(PREFIX):_accept_$(REQUEST)") {
+    field(SELM, "All")
+    field(OMSL, "closed_loop")
+    field(DOL,  "1")
+    field(OUTA, "$(PREFIX):$(REQUEST)_STATUS PP")
+    field(OUTB, "$(PREFIX):_START_$(REQUEST) PP")
+    field(FLNK, "$(PREFIX):_is_$(REQUEST)_done")
+}
+
+# Wait for request to be completed.
+# When it is, set its status to success or fail, and clear _busy.
+
+record(calcout, "$(PREFIX):_is_$(REQUEST)_done") {
+    field(INPA, "$(PREFIX):$(REQUEST)_STATUS")
+    field(INPB, "$(PREFIX):_GET_$(REQUEST)_STATE PP") # get actual state
+    field(INPC, "$(PREFIX):_MONITOR_$(REQUEST)_STATE CPP") # just to process on updates
+    field(CALC, "A==1&&B!=2")
+    field(OOPT, "When Non-zero")
+    field(OUT,  "$(PREFIX):_set_$(REQUEST)_result PP")
+}
+record(calcout, "$(PREFIX):_set_$(REQUEST)_result") {
+    field(INPA, "$(PREFIX):_GET_$(REQUEST)_STATE")
+    field(CALC, "A==1?2:3")
+    field(OUT,  "$(PREFIX):$(REQUEST)_STATUS PP")
+    field(FLNK, "$(PREFIX):_reset_count_$(REQUEST)")
+}
+
+# Clear the request state ~5 seconds after it has completed.
+record(ai, "$(PREFIX):_clear_count_$(REQUEST)") {
+    field(VAL,  "0")
+}
+record(calcout, "$(PREFIX):_scan_count_$(REQUEST)") {
+    field(SCAN, "1 second")
+    field(INPA, "$(PREFIX):$(REQUEST)_STATUS")
+    field(INPB, "$(PREFIX):_clear_count_$(REQUEST)")
+    field(CALC, "A>1")
+    field(OOPT, "When Non-zero")
+    field(DOPT, "Use OCAL")
+    field(OCAL, "B+1")
+    field(OUT,  "$(PREFIX):_clear_count_$(REQUEST) PP")
+    field(FLNK, "$(PREFIX):_check_clear_$(REQUEST)")
+}
+record(calcout, "$(PREFIX):_check_clear_$(REQUEST)")
+{
+    field(INPA, "$(PREFIX):$(REQUEST)_STATUS")
+    field(INPB, "$(PREFIX):_clear_count_$(REQUEST)")
+    field(CALC, "A>1&&B>5")
+    field(OOPT, "When Non-zero")
+    field(DOPT, "Use OCAL")
+    field(OCAL, "0")
+    field(OUT,  "$(PREFIX):$(REQUEST)_STATUS PP")
+}
+
+# This restarts the clear timeout.
+record(calcout, "$(PREFIX):_reset_count_$(REQUEST)") {
+    field(CALC, "0")
+    field(OUT,  "$(PREFIX):_clear_count_$(REQUEST) PP")
+}

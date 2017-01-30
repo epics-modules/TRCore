@@ -1,0 +1,54 @@
+# This file is part of the Transient Recorder Framework.
+# It is subject to the license terms in the LICENSE.txt file found in the
+# top-level directory of this distribution and at
+# https://confluence.slac.stanford.edu/display/ppareg/LICENSE.html. No part
+# of the Transient Recorder Framework, including this file, may be copied,
+# modified, propagated, or distributed except according to the terms
+# contained in the LICENSE.txt file.
+
+
+# Records to test the sample attribute of NDArrays.
+# Relies on NDPluginAttribute.
+
+# Macros:
+#   PREFIX    - prefix of records (: is implied)
+#   ATTR_PORT - port name of the NDPluginAttribute instance
+
+record(waveform, "$(PREFIX):SET_NAME_ATTR")
+{
+    field(DTYP, "asynOctetWrite")
+    field(INP,  "@asyn($(ATTR_PORT),0,0)ATTR_ATTRNAME")
+    field(FTVL, "CHAR")
+    field(NELM, "256")
+}
+
+record(waveform, "$(PREFIX):GET_NAME_ATTR")
+{
+    field(DTYP, "asynOctetRead")
+    field(INP,  "@asyn($(ATTR_PORT),0,0)ATTR_ATTRNAME")
+    field(FTVL, "CHAR")
+    field(NELM, "256")
+    field(SCAN, "I/O Intr")
+}
+
+record(ai, "$(PREFIX):GET_VALUE_ATTR")
+{
+   field(DTYP, "asynFloat64")
+   field(INP,  "@asyn($(ATTR_PORT),0,0)ATTR_VAL")
+   field(PREC, "4")
+   field(SCAN, "I/O Intr")
+}
+
+# enable plugin
+record(calcout, "$(PREFIX):_SET_ENABLE_ATTRIBUTE_PLUGIN")
+{
+    field(PINI, "1")
+    field(CALC, "1")
+    field(OUT,  "$(PREFIX):_ENABLE_ATTRIBUTE_PLUGIN PP")
+}
+record(longout, "$(PREFIX):_ENABLE_ATTRIBUTE_PLUGIN")
+{
+    field(DTYP, "asynInt32")
+    field(OUT,  "@asyn($(ATTR_PORT),0,0)ENABLE_CALLBACKS")
+}
+

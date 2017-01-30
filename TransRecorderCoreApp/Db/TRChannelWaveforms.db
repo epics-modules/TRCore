@@ -1,0 +1,98 @@
+# This file is part of the Transient Recorder Framework.
+# It is subject to the license terms in the LICENSE.txt file found in the
+# top-level directory of this distribution and at
+# https://confluence.slac.stanford.edu/display/ppareg/LICENSE.html. No part
+# of the Transient Recorder Framework, including this file, may be copied,
+# modified, propagated, or distributed except according to the terms
+# contained in the LICENSE.txt file.
+
+
+# Macros:
+#   PREFIX  - prefix of records (: is implied), this should
+#             include identification of the channel
+#   STDARRAYS_PORT - stdarrays port name for the channel
+#   SIZE    - waveform size (NELM)
+#   REFRESH_SNAPSHOT_SCAN - SCAN rate for the data snapshot
+
+record(waveform, "$(PREFIX):DATA")
+{
+    field(DTYP, "asynFloat64ArrayIn")
+    field(INP,  "@asyn($(STDARRAYS_PORT),0,0)STD_ARRAY_DATA")
+    field(FTVL, "DOUBLE")
+    field(NELM, "$(SIZE)")
+    field(SCAN, "I/O Intr")
+    field(TSE,  "-2")
+    field(FLNK, "$(PREFIX):_set_snapshot_dirty")
+}
+
+# Automatically enable callbacks for the stdArrays plugin.
+record(calcout, "$(PREFIX):_DATA_AUTO_ENABLE_CALLBACKS")
+{
+    field(PINI, "YES")
+    field(CALC, "1")
+    field(OUT,  "$(PREFIX):_DATA_ENABLE_CALLBACKS PP")
+}
+record(longout, "$(PREFIX):_DATA_ENABLE_CALLBACKS")
+{
+    field(DTYP, "asynInt32")
+    field(OUT,  "@asyn($(STDARRAYS_PORT),0,0)ENABLE_CALLBACKS")
+}
+
+# Blocking-callbacks configuration.
+record(bo, "$(PREFIX):SET_BLOCKING_CALLBACKS")
+{
+    field(DTYP, "asynInt32")
+    field(OUT,  "@asyn($(STDARRAYS_PORT),0,0)BLOCKING_CALLBACKS")
+    field(ZNAM, "Off")
+    field(ONAM, "On")
+    field(FLNK, "$(PREFIX):GET_BLOCKING_CALLBACKS")
+}
+record(bi, "$(PREFIX):GET_BLOCKING_CALLBACKS")
+{
+    field(PINI, "YES")
+    field(DTYP, "asynInt32")
+    field(INP,  "@asyn($(STDARRAYS_PORT),0,0)BLOCKING_CALLBACKS")
+    field(ZNAM, "Off")
+    field(ONAM, "On")
+}
+
+# Snapshot of data at a preconfigured rate.
+record(waveform, "$(PREFIX):DATA_SNAPSHOT")
+{
+    field(INP,  "$(PREFIX):DATA")
+    field(FTVL, "DOUBLE")
+    field(NELM, "$(SIZE)")
+    field(PREC, "16")
+    field(TSEL, "$(PREFIX):DATA.TIME")
+    field(FLNK, "$(PREFIX):_clear_snapshot_dirty")
+}
+
+
+# Logic for updating the data snapshot.
+# We can't just put a SCAN on DATA_SNAPSHOT, as that would generate many
+# redundant updates when the data hasn't changed, or if we used MPST="On Change",
+# occasionally necessary updates would not be done because due to the reliance
+# on comparison of hashes.
+record(bi, "$(PREFIX):_snapshot_dirty")
+{
+    field(ZNAM, "clean")
+    field(ONAM, "dirty")
+    field(VAL,  "0")
+}
+record(calcout, "$(PREFIX):_set_snapshot_dirty")
+{
+    field(CALC, "1")
+    field(OUT,  "$(PREFIX):_snapshot_dirty PP")
+}
+record(calcout, "$(PREFIX):_clear_snapshot_dirty")
+{
+    field(CALC, "0")
+    field(OUT,  "$(PREFIX):_snapshot_dirty PP")
+}
+record(fanout, "$(PREFIX):_check_shapshot_update")
+{
+    field(SCAN, "$(REFRESH_SNAPSHOT_SCAN)")
+    field(SELM, "Specified")
+    field(SELL, "$(PREFIX):_snapshot_dirty")
+    field(LNK1, "$(PREFIX):DATA_SNAPSHOT")
+}

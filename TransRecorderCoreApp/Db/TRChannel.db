@@ -1,0 +1,35 @@
+# This file is part of the Transient Recorder Framework.
+# It is subject to the license terms in the LICENSE.txt file found in the
+# top-level directory of this distribution and at
+# https://confluence.slac.stanford.edu/display/ppareg/LICENSE.html. No part
+# of the Transient Recorder Framework, including this file, may be copied,
+# modified, propagated, or distributed except according to the terms
+# contained in the LICENSE.txt file.
+
+
+# Macros:
+#   PREFIX    - prefix of records (: is implied), this should
+#               include identification of the channel
+#   CHANNELS_PORT - port name of the TRChannelsDriver instance
+#   CHANNEL   - channel number (asyn address for TRChannelsDriver)
+
+# Enable NDArray callbacks.
+record(bo, "$(PREFIX):ENABLE_ARRAY_CALLBACKS") {
+    field(PINI, "YES")
+    field(VAL,  "1")
+    field(DTYP, "asynInt32")
+    field(OUT,  "@asyn($(CHANNELS_PORT),$(CHANNEL),0)ARRAY_CALLBACKS")
+    field(ZNAM, "Off")
+    field(ONAM, "On")
+}
+
+# Enable updates of pArrays.
+# Disabling this saves memory.
+record(bo, "$(PREFIX):ENABLE_UPDATE_ARRAYS") {
+    field(PINI, "YES")
+    field(VAL,  "1")
+    field(DTYP, "asynInt32")
+    field(OUT,  "@asyn($(CHANNELS_PORT),$(CHANNEL),0)UPDATE_ARRAYS")
+    field(ZNAM, "Off")
+    field(ONAM, "On")
+}
