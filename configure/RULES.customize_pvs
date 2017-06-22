@@ -1,0 +1,24 @@
+
+# Do nothing if already included. This is because newer Base
+# will automaticlly include this file from dependant packages
+# but need to support also manual inclusion.
+ifeq ($(TRCORE_CUSTOMIZE_PVS_SCRIPT),)
+
+# Location of the Python script.
+TRCORE_CUSTOMIZE_PVS_SCRIPT := $(TR_CORE)/db/customize_pvs.py
+
+# Location and list of TRCore DBs which are customizable.
+TRCORE_DB_DIR := $(TR_CORE)/db
+TRCORE_CUSTOMIZABLE_DBS := TRBase.db TRChannel.db TRChannelData.db
+
+# Template for a rule to customize DBs.
+# $1 = Folder where original DBs are located (e.g. $(TRCORE_DB_DIR))
+# $2 = DB names without prefix (e.g. $(TRCORE_CUSTOMIZABLE_DBS))
+# $3 = Prefix for customized DBs
+# $4 = Name changes as arguments passed to customize_pvs.py.
+define TRCORE_CUSTOM_DB_RULES
+$(addprefix ../O.Common/$3,$2): $(TRCORE_CUSTOMIZE_PVS_SCRIPT) $(addprefix $1/,$2)
+	python2.7 -B $(TRCORE_CUSTOMIZE_PVS_SCRIPT) -s $1 $(addprefix -b ,$2) -p "$3" -d ../O.Common $4
+endef
+
+endif

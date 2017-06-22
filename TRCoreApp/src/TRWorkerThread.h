@@ -115,6 +115,14 @@ class TRWorkerThreadTask :
     
 public:
     /**
+     * Default constructor.
+     * 
+     * If this is used, then other functions must not be called before
+     * TRWorkerThreadTask::init is called.
+     */
+    TRWorkerThreadTask ();
+    
+    /**
      * Constructs the task object.
      * 
      * To queue the task for execution, call start.
@@ -124,6 +132,15 @@ public:
      * @param id identifier allowing disambiguation, passed to runnable
      */
     TRWorkerThreadTask (TRWorkerThread *worker, TRWorkerThreadRunnable *runnable, int id);
+    
+    /**
+     * Complete initization when the default constructor was used.
+     * 
+     * @param worker pointer to the TRWorkerThread
+     * @param runnable the runnable defining the code to run
+     * @param id identifier allowing disambiguation, passed to runnable
+     */
+    void init (TRWorkerThread *worker, TRWorkerThreadRunnable *runnable, int id);
     
     /**
      * Destructs the task object.

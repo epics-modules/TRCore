@@ -13,6 +13,7 @@
 
 #include <epicsThread.h>
 #include <epicsGuard.h>
+#include <epicsAssert.h>
 #include <errlog.h>
 
 #include "TRBaseDriver.h"
@@ -23,8 +24,8 @@ TRBaseDriver::TRBaseDriver (TRBaseConfig const &cfg)
         cfg.port_name.c_str(),
         1, // maxAddr
         NUM_BASE_ASYN_PARAMS + cfg.num_asyn_params + 2 * (NumBaseConfigParams + cfg.num_config_params),
-        asynInt32Mask|asynFloat64Mask|asynDrvUserMask, // interfaceMask
-        asynInt32Mask|asynFloat64Mask, // interruptMask
+        cfg.interface_mask|asynInt32Mask|asynFloat64Mask|asynOctetMask|asynDrvUserMask, // interfaceMask
+        cfg.interrupt_mask|asynInt32Mask|asynFloat64Mask|asynOctetMask, // interruptMask
         0, // asynFlags (no ASYN_CANBLOCK - we don't block)
         1, // autoConnect
         0, // priority (ignored with no ASYN_CANBLOCK)
@@ -32,12 +33,14 @@ TRBaseDriver::TRBaseDriver (TRBaseConfig const &cfg)
     ),
     m_num_channels(cfg.num_channels),
     m_supports_pre_samples(cfg.supports_pre_samples),
+    m_update_arrays(cfg.update_arrays),
     m_init_completed(false),
     m_allowing_data(false),
     m_max_ad_buffers(cfg.max_ad_buffers),
     m_max_ad_memory(cfg.max_ad_memory),
     m_num_config_params(NumBaseConfigParams + cfg.num_config_params),
     m_arm_state(ArmStateDisarm),
+    m_armed(false),
     m_rate_for_display(0.0),
     m_time_array_driver(cfg.port_name)
 {
@@ -48,11 +51,13 @@ TRBaseDriver::TRBaseDriver (TRBaseConfig const &cfg)
     createParam("ARM_REQUEST",           asynParamInt32,   &m_asyn_params[ARM_REQUEST]);
     createParam("ARM_STATE",             asynParamInt32,   &m_asyn_params[ARM_STATE]);
     createParam("EFFECTIVE_SAMPLE_RATE", asynParamFloat64, &m_asyn_params[EFFECTIVE_SAMPLE_RATE]);
-    createParam("BURST_ID",              asynParamInt32,     &m_asyn_params[BURST_ID]);
-    createParam("BURST_TIME_BURST",      asynParamFloat64,   &m_asyn_params[BURST_TIME_BURST]);
-    createParam("BURST_TIME_READ",       asynParamFloat64,   &m_asyn_params[BURST_TIME_READ]);
-    createParam("BURST_TIME_PROCESS",    asynParamFloat64,   &m_asyn_params[BURST_TIME_PROCESS]);
-    createParam("SLEEP_AFTER_BURST",     asynParamFloat64,   &m_asyn_params[SLEEP_AFTER_BURST]);
+    createParam("BURST_ID",              asynParamInt32,   &m_asyn_params[BURST_ID]);
+    createParam("BURST_TIME_BURST",      asynParamFloat64, &m_asyn_params[BURST_TIME_BURST]);
+    createParam("BURST_TIME_READ",       asynParamFloat64, &m_asyn_params[BURST_TIME_READ]);
+    createParam("BURST_TIME_PROCESS",    asynParamFloat64, &m_asyn_params[BURST_TIME_PROCESS]);
+    createParam("SLEEP_AFTER_BURST",     asynParamFloat64, &m_asyn_params[SLEEP_AFTER_BURST]);
+    createParam("DIGITIZER_NAME",        asynParamOctet,   &m_asyn_params[DIGITIZER_NAME]);
+    createParam("TIME_ARRAY_UNIT_INV",   asynParamFloat64, &m_asyn_params[TIME_ARRAY_UNIT_INV]);
     
     // Register write-protected parameters.
     addProtectedParam(m_asyn_params[ARM_STATE]);
@@ -61,12 +66,14 @@ TRBaseDriver::TRBaseDriver (TRBaseConfig const &cfg)
     addProtectedParam(m_asyn_params[BURST_TIME_BURST]);
     addProtectedParam(m_asyn_params[BURST_TIME_READ]);
     addProtectedParam(m_asyn_params[BURST_TIME_PROCESS]);
+    addProtectedParam(m_asyn_params[DIGITIZER_NAME]);
 
     // Set initial parameter values.
     setIntegerParam(m_asyn_params[ARM_REQUEST],          ArmStateDisarm);
     setIntegerParam(m_asyn_params[ARM_STATE],            m_arm_state);
     setDoubleParam(m_asyn_params[EFFECTIVE_SAMPLE_RATE], NAN);
-
+    setStringParam(m_asyn_params[DIGITIZER_NAME],        cfg.port_name.c_str());
+    
     // Initialize configuration parameters
     initConfigParam(m_param_num_bursts,               "NUM_BURSTS",             (double)NAN);
     initConfigParam(m_param_num_post_samples,         "NUM_POST_SAMPLES",       (double)NAN);
@@ -91,6 +98,14 @@ void TRBaseDriver::completeInit ()
     
     m_channels_driver.reset(ch_driver);
     m_init_completed = true;
+}
+
+void TRBaseDriver::setDigitizerName (char const *name)
+{
+    assert(name != NULL);
+    
+    setStringParam(m_asyn_params[DIGITIZER_NAME], name);
+    callParamCallbacks();
 }
 
 double TRBaseDriver::getRequestedSampleRate ()
@@ -136,9 +151,9 @@ void TRBaseDriver::maybeSleepForTesting ()
     }
 }
 
-bool TRBaseDriver::isDisarmed ()
+bool TRBaseDriver::isArmed ()
 {
-    return m_arm_state == ArmStateDisarm;
+    return m_armed;
 }
 
 asynStatus TRBaseDriver::writeInt32 (asynUser *pasynUser, int value)
@@ -324,6 +339,9 @@ void TRBaseDriver::readThreadIteration ()
     {
         lock();
         
+        // Assume armed for isArmed().
+        m_armed = true;
+        
         // Wait for preconditfor arming to be satisfied.
         // NOTE: On success this locks the asyn port.
         if (!waitForPreconditions()) {
@@ -347,9 +365,8 @@ void TRBaseDriver::readThreadIteration ()
             goto error;
         }
         
-        // Make sure the driver provided the rate_for_display.
-        if (std::isnan(arm_info.rate_for_display)) {
-            errlogSevPrintf(errlogMajor, "TRBaseDriver Error: The driver did not provide rate_for_display.");
+        // Sanity check information returned in arm_info.
+        if (!checkArmInfo(arm_info)) {
             unlock();
             goto error;
         }
@@ -362,7 +379,7 @@ void TRBaseDriver::readThreadIteration ()
         setEffectiveParams();
         
         // Setup the time array.
-        setupTimeArray();
+        setupTimeArray(arm_info);
         
         // Reset the arrays in the channels port.
         m_channels_driver->resetArrays();
@@ -544,6 +561,15 @@ error:
         // Set the arm state to error to make the error visible.
         setArmState(ArmStateError);
         
+        // If we don't need stopAcquisition, assume not armed for isArmed().
+        // This is so that drivers still allow certain operations that are
+        // not permitted while armed, if the error was before startAcquisition
+        // was called.
+        if (!need_stop_acquisition) {
+            m_armed = false;
+            onDisarmed();
+        }
+        
         // Wait until disarming is requested.
         unlock();
         waitUntilDisarming();
@@ -559,6 +585,10 @@ error:
         stopAcquisition();
         lock();
     }
+        
+    // Assume not armed for isArmed().
+    m_armed = false;
+    onDisarmed();
     
     // Reset the effective-value parameters to invalid values.
     clearEffectiveParams();
@@ -644,18 +674,20 @@ bool TRBaseDriver::checkBasicSettings ()
     
     // Sanity check NUM_POST_SAMPLES.
     int num_post_samples = m_param_num_post_samples.getSnapshot();
-    if (num_post_samples <= 0) {
-        errlogSevPrintf(errlogMajor, "TRBaseDriver Error: NUM_POST_SAMPLES is not positive.\n");
+    if (num_post_samples < 0) {
+        errlogSevPrintf(errlogMajor, "TRBaseDriver Error: NUM_POST_SAMPLES is negative.\n");
         return false;
     }
     
     if (m_requested_arm_state == ArmStatePrePostTrigger) {
-        // Sanity check post samples.
+        // Check that pre-trigger samples are supported.
         if (!m_supports_pre_samples) {
             errlogSevPrintf(errlogMajor,
                 "TRBaseDriver Error: prePostTrigger requested but pre-samples not supported.\n");
             return false;
         }
+        
+        // Check that there is at least one pre-trigger sample.
         int num_pre_post_samples = m_param_num_pre_post_samples.getSnapshot();
         if (num_pre_post_samples <= num_post_samples) {
             errlogSevPrintf(errlogMajor,
@@ -663,31 +695,75 @@ bool TRBaseDriver::checkBasicSettings ()
             return false;
         }
     } else {
+        // Check that there is at least one post-trigger sample.
+        if (num_post_samples == 0) {
+            errlogSevPrintf(errlogMajor,
+                "TRBaseDriver Error: NUM_POST_SAMPLES is zero (no pre-trigger samples).\n");
+            return false;
+        }
+        
         // Set NUM_PRE_POST_SAMPLES as irrelevant since pre-samples are not used.
-        // Also set its snapshot value to zero so that getNumPostSamplesSnapshot
-        // will return zero.
+        // Also set its snapshot value to NUM_POST_SAMPLES to simplify the driver
+        // implementation.
         m_param_num_pre_post_samples.setIrrelevant();
-        m_param_num_pre_post_samples.setSnapshot(0);
+        m_param_num_pre_post_samples.setSnapshot(num_post_samples);
     }
     
     return true;
 }
 
-void TRBaseDriver::setupTimeArray ()
+bool TRBaseDriver::checkArmInfo (TRArmInfo const &arm_info)
 {
-    // The unit for the time array is the reciprocal of the rate.
-    double unit = 1.0 / m_rate_for_display;
+    // Make sure the driver provided the rate_for_display.
+    if (std::isnan(arm_info.rate_for_display)) {
+        errlogSevPrintf(errlogMajor, "TRBaseDriver Error: The driver did not provide rate_for_display.");
+        return false;
+    }
     
-    // Get the settings for the number of samples.
-    int num_post = m_param_num_post_samples.getSnapshot();
-    int num_pre_post = m_param_num_pre_post_samples.getSnapshot();
+    // Check custom inputs for time array calculation.
+    if (arm_info.custom_time_array_calc_inputs) {
+        if (arm_info.custom_time_array_num_pre_samples < 0) {
+            errlogSevPrintf(errlogMajor, "TRBaseDriver Error: custom_time_array_num_pre_samples is negative.");
+            return false;
+        }
+        if (arm_info.custom_time_array_num_post_samples < 0) {
+            errlogSevPrintf(errlogMajor, "TRBaseDriver Error: custom_time_array_num_post_samples is negative.");
+            return false;
+        }
+    }
     
-    // Calculate the number of pre-samples.
-    // Note the calculation is valid due to checkBasicSettings.
-    int num_pre = (num_pre_post == 0) ? 0 : (num_pre_post - num_post);
+    return true;
+}
+
+void TRBaseDriver::setupTimeArray (TRArmInfo const &arm_info)
+{
+    // Get the inverse of the unit (in seconds^-1).
+    double time_unit_inv;
+    getDoubleParam(m_asyn_params[TIME_ARRAY_UNIT_INV], &time_unit_inv);
+    
+    // Calculate the time step for the array.
+    double time_step = time_unit_inv / m_rate_for_display;
+    
+    int num_pre;
+    int num_post;
+    
+    if (arm_info.custom_time_array_calc_inputs) {
+        // Get custom pre/post counts for time array calculation.
+        num_pre = arm_info.custom_time_array_num_pre_samples;
+        num_post = arm_info.custom_time_array_num_post_samples;
+    } else {
+        // Get the settings for the number of samples.
+        num_post = m_param_num_post_samples.getSnapshot();
+        int num_pre_post = m_param_num_pre_post_samples.getSnapshot();
+        
+        // Calculate the number of pre-samples.
+        // Note the calculation is valid due to checkBasicSettings.
+        assert(num_pre_post >= num_post);
+        num_pre = num_pre_post - num_post;
+    }
     
     // Set the the time array parameters.
-    m_time_array_driver.setTimeArrayParams(unit, num_pre, num_post);
+    m_time_array_driver.setTimeArrayParams(time_step, num_pre, num_post);
 }
 
 TRChannelsDriver * TRBaseDriver::createChannelsDriver ()
@@ -741,4 +817,9 @@ void TRBaseDriver::interruptReading ()
     // Default implementation for drivers which do not use our read loop.
     // We do not need to do anything because m_disarm_requested_event
     // has just been signaled, which will cause readBurst to return.
+}
+
+void TRBaseDriver::onDisarmed ()
+{
+    // Default implementation does nothing.
 }

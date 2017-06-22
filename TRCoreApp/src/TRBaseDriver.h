@@ -146,6 +146,21 @@ public:
     }
     
     /**
+     * Set the name of the digitizer, which will appear as the value
+     * of the "name" PV.
+     * 
+     * The default name is the asyn port name.
+     * 
+     * This function MUST be called with the port locked, except if
+     * called before EPICS could interact with the asyn port such as
+     * from the driver's constructor.
+     * 
+     * @param name Digitizer name (pointer is not used after return).
+     *             Must not be NULL.
+     */
+    void setDigitizerName (char const *name);
+    
+    /**
      * Returns the requested sample rate.
      * 
      * Note that it is allowed for the driver to use special sample
@@ -181,7 +196,7 @@ public:
      * framework's read loop so that they can initiate disarming when the
      * requested number of bursts have been captured.
      * 
-     * See checkSettings for limitations regarding reading snapshot values.
+     * See @ref checkSettings for limitations regarding reading snapshot values.
      * 
      * @return The snapshot number of bursts.
      */
@@ -191,11 +206,14 @@ public:
     }
     
     /**
-     * Returns the snapshot value of the number of post-samples.
+     * Returns the snapshot value of the number of post-trigger samples per event.
      * 
-     * This will be positive.
+     * This will be non-negative. If the driver does not declare support
+     * for pre-trigger samples (@ref TRBaseConfig::supports_pre_samples is false),
+     * then this is also guaranteed to be positive. Otherwise, see
+     * @ref getNumPrePostSamplesSnapshot for additional guarantees.
      * 
-     * See checkSettings for limitations regarding reading snapshot values.
+     * See @ref checkSettings for limitations regarding reading snapshot values.
      * 
      * @return The snapshot number of post-samples.
      */
@@ -205,13 +223,14 @@ public:
     }
     
     /**
-     * Returns the snapshot value for the number of pre-post-samples.
+     * Returns the snapshot value for the total number of samples per event
+     * (counting pre-trigger and post-trigger samples).
      * 
-     * Value 0 means to not use pre-sample mode. Otherwise, this is the
-     * total number of samples in a burst and is greater than the number
-     * of post-samples (@ref getNumPostSamplesSnapshot).
+     * This will always be positive and will be greater than or equal to
+     * @ref getNumPostSamplesSnapshot. Equality means that no pre-trigger samples
+     * are desired.
      * 
-     * See checkSettings for limitations regarding reading snapshot values.
+     * See @ref checkSettings for limitations regarding reading snapshot values.
      * 
      * @return The snapshot number of pre-post-samples.
      */
@@ -226,7 +245,7 @@ public:
      * This will be the value of @ref getRequestedSampleRate at the time the
      * snapshot was made.
      * 
-     * See checkSettings for limitations regarding reading snapshot values.
+     * See @ref checkSettings for limitations regarding reading snapshot values.
      * 
      * @return The snapshot requested sample rate.
      */
@@ -241,7 +260,7 @@ public:
      * This will be the last value set using @ref setAchievableSampleRate at the
      * time the snapshot was made.
      * 
-     * See checkSettings for limitations regarding reading snapshot values.
+     * See @ref checkSettings for limitations regarding reading snapshot values.
      * 
      * @return The snapshot achievable sample rate.
      */
@@ -322,16 +341,18 @@ public:
     void maybeSleepForTesting ();
     
     /**
-     * Check if acquisition is currently disarmed.
+     * Check if acquisition is currently armed.
      * 
-     * Being disarmed means that we are outside of any stage of
-     * arming (arming, armed, disarming).
+     * For the purposes of this function, acquisition becomes armed when
+     * waitForPreconditions is started and becomes not armed after
+     * stopAcquisition returns, or if there was an error before
+     * startAcquisition then immediately after the error.
      * 
      * This function MUST be called with the port locked.
      * 
      * @return True if disarmed, false if not.
      */
-    bool isDisarmed ();
+    bool isArmed ();
     
 protected:
     /**
@@ -590,6 +611,38 @@ protected:
      */
     virtual void stopAcquisition () = 0;
     
+    /**
+     * Called when @ref isArmed() changes from true to false.
+     * 
+     * This is called with the port locked and it MUST NOT unlock it.
+     * 
+     * This was added to support a design where changing a desired configuration
+     * parameter value should actually apply the change immediately unless the digitizer
+     * is armed, but if the value is changed while armed it should still be applied
+     * automatically when the digitizer is disarmed. To implement this correctly
+     * you should:
+     * - Override the write function corresponding to the type of the type of the
+     *   parameter (@ref writeInt32 or @ref writeFloat64). There, before checking
+     *   whether the parameter is owned by one of the base classes, check if the
+     *   parameter index is equal to @ref TRConfigParam::desiredParamIndex().
+     *   If it is equal then...
+     * - Call @ref isArmed() and if it returned false, apply the configuration to hardware.
+     *   You should use the value parameter of the function since
+     *   @ref TRConfigParam::getDesired was not updated yet at this point.
+     *   You should still call and return the result of the base class write function
+     *   regardless of isArmed.
+     * - Implement onDisarmed and in that function ensure that the value returned by
+     *   @ref TRConfigParam::getDesired is applied to the hardware. You can use a dirty
+     *   flag to avoid having to access the hardware redundantly.
+     * 
+     * Do not instead use @ref stopAcquisition for this or similar purposes because of
+     * possible race conditions and since stopAcquisition may not be called in case of
+     * an early error.
+     * 
+     * The default implementation does nothing.
+     */
+    virtual void onDisarmed ();
+    
 public:
     /**
      * Overridden asyn parameter write handler.
@@ -635,6 +688,8 @@ private:
         BURST_TIME_READ,
         BURST_TIME_PROCESS,
         SLEEP_AFTER_BURST,
+        DIGITIZER_NAME,
+        TIME_ARRAY_UNIT_INV,
         NUM_BASE_ASYN_PARAMS
     };
 
@@ -654,6 +709,10 @@ private:
     // Whether the driver supports pre-samples.
     bool m_supports_pre_samples;
     
+    // Whether copies of submitted NDArrays are kept in the TRChannelsDriver
+    // (initial value only used by TRChannelsDriver constructor).
+    bool m_update_arrays;
+
     // Flag whether completeInit has been called.
     bool m_init_completed;
     
@@ -690,6 +749,9 @@ private:
     
     // Arm state maintained internally.
     ArmState m_arm_state;
+    
+    // A simplified armed state useful for drivers.
+    bool m_armed;
     
     // When arming, the requested arm state (ArmStatePostTrigger or ArmStatePrePostTrigger).
     ArmState m_requested_arm_state;
@@ -769,8 +831,11 @@ private:
     // Check basic settings before proceeding with arming.
     bool checkBasicSettings ();
     
+    // Check values provided by checkSettings in TRArmInfo.
+    bool checkArmInfo (TRArmInfo const &arm_info);
+    
     // Sets up the time array based on snapshot settings and m_rate_for_display.
-    void setupTimeArray ();
+    void setupTimeArray (TRArmInfo const &arm_info);
 };
 
 #endif

@@ -35,7 +35,10 @@ class TRArmInfo :
     
 private:
     inline TRArmInfo ()
-    : rate_for_display(NAN)
+    : rate_for_display(NAN),
+      custom_time_array_calc_inputs(false),
+      custom_time_array_num_pre_samples(0),
+      custom_time_array_num_post_samples(0)
     {
     }
     
@@ -46,6 +49,32 @@ public:
      * Notably, this will used for computing the time array.
      */
     double rate_for_display;
+    
+    /**
+     * Enable custom sample number inputs for calculation of the time array.
+     * 
+     * If this is true, than @ref custom_time_array_num_pre_samples
+     * and @ref custom_time_array_num_post_samples will be used to calculate
+     * the time array instead of the desired sample number settings.
+     * The default is false.
+     */
+    bool custom_time_array_calc_inputs;
+    
+    /**
+     * Custom number of pre-trigger samples for the time array.
+     * 
+     * The default is zero, and this is only relevant if
+     * @ref custom_time_array_calc_inputs is true.
+     */
+    int custom_time_array_num_pre_samples;
+    
+    /**
+     * Custom number of post-trigger samples for the time array.
+     * 
+     * The default is zero, and this is only relevant if
+     * @ref custom_time_array_calc_inputs is true.
+     */
+    int custom_time_array_num_post_samples;
 };
 
 #endif

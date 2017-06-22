@@ -12,9 +12,15 @@ include $(TOP)/configure/CONFIG
 # databases, templates, substitutions like this
 DB += TRBase.db
 DB += TRChannel.db
-DB += TRChannelWaveforms.db
+DB += TRChannelData.db
 DB += TRGenericRequest.db
 DB += TRSampleRateAttrTest.db
+
+# Install the Python script for customizing PV names.
+# The cfg folder would be the preferred place for this but it does
+# not work with old EPICS versions as they would try to include the
+# script from a makefile. So install to the db folder instead.
+DB_INSTALLS += ../customize_pvs.py
 
 #----------------------------------------------------
 # If <anyname>.db template is not named <anyname>*.template add

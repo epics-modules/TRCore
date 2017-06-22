@@ -20,7 +20,7 @@ void TRConfigParam<ValueType, EffectiveValueType>::init (
     TRBaseDriver *driver, char const *base_name, EffectiveValueType invalid_value, bool internal)
 {
     assert(!m_initialized);
-    assert(driver->m_config_params.size() < driver->m_num_config_params);
+    assert(driver->m_config_params.size() < (size_t)driver->m_num_config_params);
 
     // Remember initialization info.
     m_initialized = true;

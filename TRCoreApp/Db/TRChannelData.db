@@ -1,0 +1,132 @@
+# This file is part of the Transient Recorder Framework.
+# It is subject to the license terms in the LICENSE.txt file found in the
+# top-level directory of this distribution and at
+# https://confluence.slac.stanford.edu/display/ppareg/LICENSE.html. No part
+# of the Transient Recorder Framework, including this file, may be copied,
+# modified, propagated, or distributed except according to the terms
+# contained in the LICENSE.txt file.
+
+
+# Macros:
+#   PREFIX  - prefix of records (: is implied), this should
+#             include identification of the channel
+#   STDAR_PORT - stdarrays port name for the channel
+#   SIZE    - waveform size (NELM)
+#   FTVL    - waveform data type (FTVL), default is DOUBLE
+#   WF_DTYP - waveform device support (DTYP), default is asynFloat64ArrayIn
+#   SNAP_SCAN - SCAN rate for the data snapshot
+#   TIMESTAMP_FMT - timestamp format (default %Y-%m-%d %H:%M:%S.%06f)
+#   SNAPSHOT - set to # to disable data snapshot, default is enabled
+#   TIMESTAMP - set to empty to enable timestamp records, default is disabled (#)
+#   DATA_UPD_LNK - record to process when the data waveform is updated,
+#                      defailt is none (empty)
+#   SNAP_UPD_LNK - as above but when the snapshot is updated
+
+# Latest data for the channel.
+record(waveform, "$(PREFIX):DATA")
+{
+    field(DTYP, "$(WF_DTYP=asynFloat64ArrayIn)")
+    field(INP,  "@asyn($(STDAR_PORT),0,0)STD_ARRAY_DATA")
+    field(FTVL, "$(FTVL=DOUBLE)")
+    field(NELM, "$(SIZE)")
+    field(SCAN, "I/O Intr")
+    field(TSE,  "-2")
+    field(FLNK, "$(PREFIX):_data_updated")
+}
+
+record(fanout, "$(PREFIX):_data_updated") {
+    field(SELM, "All")
+    $(TIMESTAMP=#) field(LNK1, "$(PREFIX):DATA_TIMESTAMP")
+    $(SNAPSHOT=) field(LNK2, "$(PREFIX):_set_snapshot_dirty")
+    field(LNK3, "$(DATA_UPD_LNK=)")
+}
+
+# Timestamp string corresponding to DATA.
+$(TIMESTAMP=#) record(stringin, "$(PREFIX):DATA_TIMESTAMP") {
+$(TIMESTAMP=#)     field(DTYP, "Soft Timestamp")
+$(TIMESTAMP=#)     field(VAL,  "0")
+$(TIMESTAMP=#)     field(INP,  "@$(TIMESTAMP_FMT=%Y-%m-%d %H:%M:%S.%06f)")
+$(TIMESTAMP=#)     field(TSEL, "$(PREFIX):DATA.TIME")
+$(TIMESTAMP=#) }
+
+# Automatically enable callbacks for the stdArrays plugin.
+record(calcout, "$(PREFIX):_DATA_AUTO_ENABLE_CALLBACKS")
+{
+    field(PINI, "YES")
+    field(CALC, "1")
+    field(OUT,  "$(PREFIX):_DATA_ENABLE_CALLBACKS PP")
+}
+record(longout, "$(PREFIX):_DATA_ENABLE_CALLBACKS")
+{
+    field(DTYP, "asynInt32")
+    field(OUT,  "@asyn($(STDAR_PORT),0,0)ENABLE_CALLBACKS")
+}
+
+# Blocking-callbacks configuration.
+record(bo, "$(PREFIX):SET_BLOCKING_CALLBACKS")
+{
+    field(DTYP, "asynInt32")
+    field(OUT,  "@asyn($(STDAR_PORT),0,0)BLOCKING_CALLBACKS")
+    field(ZNAM, "Off")
+    field(ONAM, "On")
+    field(FLNK, "$(PREFIX):GET_BLOCKING_CALLBACKS")
+}
+record(bi, "$(PREFIX):GET_BLOCKING_CALLBACKS")
+{
+    field(PINI, "YES")
+    field(DTYP, "asynInt32")
+    field(INP,  "@asyn($(STDAR_PORT),0,0)BLOCKING_CALLBACKS")
+    field(ZNAM, "Off")
+    field(ONAM, "On")
+}
+
+# Snapshot of data at a preconfigured rate.
+$(SNAPSHOT=) record(waveform, "$(PREFIX):DATA_SNAPSHOT")
+$(SNAPSHOT=) {
+$(SNAPSHOT=)     field(INP,  "$(PREFIX):DATA")
+$(SNAPSHOT=)     field(FTVL, "$(FTVL=DOUBLE)")
+$(SNAPSHOT=)     field(NELM, "$(SIZE)")
+$(SNAPSHOT=)     field(PREC, "16")
+$(SNAPSHOT=)     field(TSEL, "$(PREFIX):DATA.TIME")
+$(SNAPSHOT=)     field(FLNK, "$(PREFIX):_data_snapshot_updated")
+$(SNAPSHOT=) }
+
+$(SNAPSHOT=) record(fanout, "$(PREFIX):_data_snapshot_updated") {
+$(SNAPSHOT=)     field(SELM, "All")
+$(SNAPSHOT=)     $(TIMESTAMP=#) field(LNK1, "$(PREFIX):DATA_SNAPSHOT_TIMESTAMP")
+$(SNAPSHOT=)     field(LNK2, "$(PREFIX):_clear_snapshot_dirty")
+$(SNAPSHOT=)     field(LNK3, "$(SNAP_UPD_LNK=)")
+$(SNAPSHOT=) }
+
+# Timestamp string corresponding to DATA_SNAPSHOT.
+$(SNAPSHOT=) $(TIMESTAMP=#) record(stringin, "$(PREFIX):DATA_SNAPSHOT_TIMESTAMP") {
+$(SNAPSHOT=) $(TIMESTAMP=#)     field(DTYP, "Soft Timestamp")
+$(SNAPSHOT=) $(TIMESTAMP=#)     field(VAL,  "0")
+$(SNAPSHOT=) $(TIMESTAMP=#)     field(INP,  "@$(TIMESTAMP_FMT=%Y-%m-%d %H:%M:%S.%06f)")
+$(SNAPSHOT=) $(TIMESTAMP=#)     field(TSEL, "$(PREFIX):DATA_SNAPSHOT.TIME")
+$(SNAPSHOT=) $(TIMESTAMP=#) }
+
+# Logic for updating the data snapshot.
+# We can't just put a SCAN on DATA_SNAPSHOT, as that would generate many
+# redundant updates when the data hasn't changed, or if we used MPST="On Change",
+# occasionally necessary updates would not be done because due to the reliance
+# on comparison of hashes.
+$(SNAPSHOT=) record(bi, "$(PREFIX):_snapshot_dirty") {
+$(SNAPSHOT=)     field(ZNAM, "clean")
+$(SNAPSHOT=)     field(ONAM, "dirty")
+$(SNAPSHOT=)     field(VAL,  "0")
+$(SNAPSHOT=) }
+$(SNAPSHOT=) record(calcout, "$(PREFIX):_set_snapshot_dirty") {
+$(SNAPSHOT=)     field(CALC, "1")
+$(SNAPSHOT=)     field(OUT,  "$(PREFIX):_snapshot_dirty PP")
+$(SNAPSHOT=) }
+$(SNAPSHOT=) record(calcout, "$(PREFIX):_clear_snapshot_dirty") {
+$(SNAPSHOT=)     field(CALC, "0")
+$(SNAPSHOT=)     field(OUT,  "$(PREFIX):_snapshot_dirty PP")
+$(SNAPSHOT=) }
+$(SNAPSHOT=) record(fanout, "$(PREFIX):_check_shapshot_update") {
+$(SNAPSHOT=)     field(SCAN, "$(SNAP_SCAN)")
+$(SNAPSHOT=)     field(SELM, "Specified")
+$(SNAPSHOT=)     field(SELL, "$(PREFIX):_snapshot_dirty")
+$(SNAPSHOT=)     field(LNK1, "$(PREFIX):DATA_SNAPSHOT")
+$(SNAPSHOT=) }

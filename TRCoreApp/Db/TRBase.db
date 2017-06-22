@@ -10,14 +10,29 @@
 # Macros:
 #   PREFIX  - prefix of records (: is implied)
 #   PORT    - port name of the TRBaseDriver based instance
-#   DEVICE_NAME - arbitrary device name for the name record
 #   SIZE - waveform size (NELM) for time array
 #   PRESAMPLES - "#" if presamples are not supported, "" if supported
+#   TIME_UNIT_INV - initial value of TIME_UNIT_INV, default is 1
+#   TIME_EGU - EGU field of TIME_DATA, default is "s"
+#   TIMESTAMP_FMT - timestamp format (default %Y-%m-%d %H:%M:%S.%06f)
+#   PERSECOND_FIELDS - extra fields for perSecond record (default empty)
+#   AUTORESTART_ZNAM - ZNAM for autoRestart (default Off)
+#   AUTORESTART_ONAM - ONAM for autoRestart (default On)
+#   LNK_NEW_BURST - link to process after information for a new burst
+#                   is available (default empty)
+#   NOCLK - set to "#" to disable sample rate configuration records
+#           (default empty - enabled).
 
 # Device name.
 record(stringin, "$(PREFIX):name") {
     field(PINI, "YES")
-    field(VAL,  "$(DEVICE_NAME)")
+    field(SCAN, "I/O Intr")
+    field(DTYP, "asynOctetRead")
+    field(INP,  "@asyn($(PORT),0,0)DIGITIZER_NAME")
+    # Enabling buffer to prevent deadlock, see
+    # http://www.aps.anl.gov/epics/modules/soft/asyn/R4-31/KnownProblems.html
+    # Size 1 does not work so use 2.
+    info(asyn:FIFO, "2")
 }
 
 # This record is used to request arming or disarming.
@@ -134,9 +149,9 @@ record(calcout, "$(PREFIX):_update_arm_state") {
 # the driver's NUM_BURSTS setting is calculated based on
 # autoRestart and NUM_BURSTS.
 record(bo, "$(PREFIX):autoRestart") {
-    field(ZNAM, "Off")
-    field(ONAM, "On")
-    field(VAL,  "1")
+    field(ZNAM, "$(AUTORESTART_ZNAM=Off)")
+    field(ONAM, "$(AUTORESTART_ONAM=On)")
+    field(VAL,  "$(DEFAULT_AUTORESTART=1)")
     field(STAT, "NO_ALARM")
     field(SEVR, "NO_ALARM")
     field(FLNK, "$(PREFIX):_update_numBursts")
@@ -146,7 +161,7 @@ record(bo, "$(PREFIX):autoRestart") {
 # In this case it means whether to read unlimited bursts
 # (value is <=0) or a fixed number of bursts (value is positive).
 record(longout, "$(PREFIX):NUM_BURSTS") {
-    field(VAL,  "0")
+    field(VAL,  "$(DEFAULT_NUM_BURSTS=0)")
     field(STAT, "NO_ALARM")
     field(SEVR, "NO_ALARM")
     field(FLNK, "$(PREFIX):_update_numBursts")
@@ -178,7 +193,7 @@ record(ai,  "$(PREFIX):GET_ARMED_NUM_BURSTS") {
 # Number of post-trigger samples (desired and effective).
 record(longout, "$(PREFIX):numberPTS") {
     field(PINI, "YES")
-    field(VAL,  "900")
+    field(VAL,  "$(DEFAULT_NUM_PTS=900)")
     field(DTYP, "asynInt32")
     field(OUT,  "@asyn($(PORT),0,0)DESIRED_NUM_POST_SAMPLES")
 }
@@ -194,7 +209,7 @@ record(ai,  "$(PREFIX):get_numberPTS") {
 # (pre + post samples), and must be greater than numberPTS.
 $(PRESAMPLES) record(longout, "$(PREFIX):numberPPS") {
 $(PRESAMPLES)     field(PINI, "YES")
-$(PRESAMPLES)     field(VAL,  "0")
+$(PRESAMPLES)     field(VAL,  "$(DEFAULT_NUM_PPS=0)")
 $(PRESAMPLES)     field(DTYP, "asynInt32")
 $(PRESAMPLES)     field(OUT,  "@asyn($(PORT),0,0)DESIRED_NUM_PRE_POST_SAMPLES")
 $(PRESAMPLES) }
@@ -207,36 +222,36 @@ $(PRESAMPLES) }
 # Requested sample rate (desired and effective).
 # The desired record is meant to be internal since its value is
 # determined  by other records (clock, customSampleRate).
-record(ao, "$(PREFIX):_requestedSampleRate") {
-    field(DTYP, "asynFloat64")
-    field(OUT,  "@asyn($(PORT),0,0)DESIRED_REQUESTED_SAMPLE_RATE")
-}
-record(ai, "$(PREFIX):GET_ARMED_REQUESTED_SAMPLE_RATE") {
-    field(SCAN, "I/O Intr")
-    field(DTYP, "asynFloat64")
-    field(INP,  "@asyn($(PORT),0,0)EFFECTIVE_REQUESTED_SAMPLE_RATE")
-    field(EGU,  "Hz")
-    field(PREC, "4")
-}
+$(NOCLK=) record(ao, "$(PREFIX):_requestedSampleRate") {
+$(NOCLK=)     field(DTYP, "asynFloat64")
+$(NOCLK=)     field(OUT,  "@asyn($(PORT),0,0)DESIRED_REQUESTED_SAMPLE_RATE")
+$(NOCLK=) }
+$(NOCLK=) record(ai, "$(PREFIX):GET_ARMED_REQUESTED_SAMPLE_RATE") {
+$(NOCLK=)     field(SCAN, "I/O Intr")
+$(NOCLK=)     field(DTYP, "asynFloat64")
+$(NOCLK=)     field(INP,  "@asyn($(PORT),0,0)EFFECTIVE_REQUESTED_SAMPLE_RATE")
+$(NOCLK=)     field(EGU,  "Hz")
+$(NOCLK=)     field(PREC, "4")
+$(NOCLK=) }
 
 # Achievable sample rate (desired and effective).
 # The desired achievable sample rate is calculated automatically
 # from the desired requested sample rate, hence it is an input
 # record.
-record(ai, "$(PREFIX):ACHIEVABLE_SAMPLE_RATE") {
-    field(SCAN, "I/O Intr")
-    field(DTYP, "asynFloat64")
-    field(INP,  "@asyn($(PORT),0,0)DESIRED_ACHIEVABLE_SAMPLE_RATE")
-    field(EGU,  "Hz")
-    field(PREC, "4")
-}
-record(ai, "$(PREFIX):GET_SAMPLE_RATE") {
-    field(SCAN, "I/O Intr")
-    field(DTYP, "asynFloat64")
-    field(INP,  "@asyn($(PORT),0,0)EFFECTIVE_ACHIEVABLE_SAMPLE_RATE")
-    field(EGU,  "Hz")
-    field(PREC, "4")
-}
+$(NOCLK=) record(ai, "$(PREFIX):ACHIEVABLE_SAMPLE_RATE") {
+$(NOCLK=)     field(SCAN, "I/O Intr")
+$(NOCLK=)     field(DTYP, "asynFloat64")
+$(NOCLK=)     field(INP,  "@asyn($(PORT),0,0)DESIRED_ACHIEVABLE_SAMPLE_RATE")
+$(NOCLK=)     field(EGU,  "Hz")
+$(NOCLK=)     field(PREC, "4")
+$(NOCLK=) }
+$(NOCLK=) record(ai, "$(PREFIX):GET_SAMPLE_RATE") {
+$(NOCLK=)     field(SCAN, "I/O Intr")
+$(NOCLK=)     field(DTYP, "asynFloat64")
+$(NOCLK=)     field(INP,  "@asyn($(PORT),0,0)EFFECTIVE_ACHIEVABLE_SAMPLE_RATE")
+$(NOCLK=)     field(EGU,  "Hz")
+$(NOCLK=)     field(PREC, "4")
+$(NOCLK=) }
 
 # Sample rate used for the time array when armed.
 # This value is reported by the driver during arming. It may be
@@ -250,6 +265,17 @@ record(ai, "$(PREFIX):GET_DISPLAY_SAMPLE_RATE") {
     field(PREC, "4")
 }
 
+# Configuration of the unit for the time array (inverse).
+# For example to get millisecond units, set this to 1000.
+# It is you responsibility to set matching EGU in TIME_DATA.
+record(ao, "$(PREFIX):TIME_UNIT_INV") {
+    field(DTYP, "asynFloat64")
+    field(OUT,  "@asyn($(PORT),0,0)TIME_ARRAY_UNIT_INV")
+    field(EGU,  "s^-1")
+    field(VAL,  "$(TIME_UNIT_INV=1)")
+    field(PINI, "YES")
+}
+
 # Time array.
 record(waveform, "$(PREFIX):TIME_DATA") {
     field(DTYP, "asynFloat64ArrayIn")
@@ -257,6 +283,7 @@ record(waveform, "$(PREFIX):TIME_DATA") {
     field(FTVL, "DOUBLE")
     field(NELM, "$(SIZE)")
     field(PREC, "10")
+    field(EGU,  "$(TIME_EGU=s)")
 }
 
 # Update the time array when the time array parameters are updated.
@@ -270,6 +297,7 @@ record(longin, "$(PREFIX):_time_array_update") {
 # ID of last burst.
 record(longin, "$(PREFIX):GET_BURST_ID") {
     field(SCAN, "I/O Intr")
+    field(PRIO, "MEDIUM")
     field(DTYP, "asynInt32")
     field(INP,  "@asyn($(PORT),0,0)BURST_ID")
     field(TSE,  "-2")
@@ -280,7 +308,7 @@ record(longin, "$(PREFIX):GET_BURST_ID") {
 record(stringin, "$(PREFIX):GET_LAST_BURST_TIME") {
     field(DTYP, "Soft Timestamp")
     field(VAL,  "0")
-    field(INP,  "@%Y-%m-%d %H:%M:%S.%06f")
+    field(INP,  "@$(TIMESTAMP_FMT=%Y-%m-%d %H:%M:%S.%06f)")
     field(TSEL, "$(PREFIX):GET_BURST_ID.TIME")
 }
 
@@ -307,6 +335,7 @@ record(ai, "$(PREFIX):GET_READ_END_TO_DATA_PROCESSED_TIME") {
 # - Proces GET_LAST_BURST_TIME process.
 # - Process the diagnostic times.
 # - Increment the trigger count.
+# - Process a user-defined link if defined.
 record(fanout, "$(PREFIX):_burst_id_changed") {
     field(SELM, "All")
     field(LNK1, "$(PREFIX):GET_LAST_BURST_TIME")
@@ -314,14 +343,17 @@ record(fanout, "$(PREFIX):_burst_id_changed") {
     field(LNK3, "$(PREFIX):GET_BURST_END_TO_READ_END_TIME")
     field(LNK4, "$(PREFIX):GET_READ_END_TO_DATA_PROCESSED_TIME")
     field(LNK5, "$(PREFIX):_trigger_count")
+    field(LNK6, "$(LNK_NEW_BURST=)")
 }
 
 # Bursts per second counter.
 record(longin, "$(PREFIX):perSecond") {
     field(PINI, "YES")
     field(SCAN, "1 second")
+    field(EGU,  "Hz")
     field(INP,  "$(PREFIX):_trigger_count")
     field(FLNK, "$(PREFIX):_reset_trigger_count")
+    $(PERSECOND_FIELDS=)
 }
 record(calc, "$(PREFIX):_trigger_count") {
     field(CALC, "VAL+1")

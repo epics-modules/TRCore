@@ -7,10 +7,13 @@
  * contained in the LICENSE.txt file.
  */
 
+#include <stddef.h>
+
 #include <algorithm>
 
 #include <epicsThread.h>
 #include <epicsGuard.h>
+#include <epicsAssert.h>
 
 #include "TRWorkerThread.h"
 
@@ -82,20 +85,45 @@ void TRWorkerThread::run ()
     }
 }
 
+TRWorkerThreadTask::TRWorkerThreadTask ()
+: m_worker(NULL),
+  m_runnable(NULL),
+  m_id(0)
+{
+}
+
+
 TRWorkerThreadTask::TRWorkerThreadTask (TRWorkerThread *worker, TRWorkerThreadRunnable *runnable, int id)
 : m_worker(worker),
   m_runnable(runnable),
   m_id(id)
 {
+    assert(worker != NULL);
+    assert(runnable != NULL);
 }
 
 TRWorkerThreadTask::~TRWorkerThreadTask ()
 {
-    cancel();
+    if (m_worker != NULL) {
+        cancel();
+    }
+}
+
+void TRWorkerThreadTask::init (TRWorkerThread *worker, TRWorkerThreadRunnable *runnable, int id)
+{
+    assert(m_worker == NULL);
+    assert(worker != NULL);
+    assert(runnable != NULL);
+    
+    m_worker = worker;
+    m_runnable = runnable;
+    m_id = id;
 }
 
 bool TRWorkerThreadTask::start ()
 {
+    assert(m_worker != NULL);
+    
     {
         epicsGuard<epicsMutex> lock(m_worker->m_mutex);
         
@@ -116,6 +144,8 @@ bool TRWorkerThreadTask::start ()
 
 bool TRWorkerThreadTask::cancel ()
 {
+    assert(m_worker != NULL);
+    
     epicsGuard<epicsMutex> lock(m_worker->m_mutex);
     
     // Remove it from the queue if it is queued.

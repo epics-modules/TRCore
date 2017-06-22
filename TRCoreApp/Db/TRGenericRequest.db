@@ -33,6 +33,7 @@ record(ai, "$(PREFIX):_MONITOR_$(REQUEST)_STATE") {
     field(DTYP, "asynInt32")
     field(INP,  "@asyn($(PORT),0,0)$(REQUEST)")
     field(MDEL, "NAN") # force monitor event on each process
+    field(FLNK, "$(PREFIX):_$(REQUEST)_state_changed")
 }
 record(mbbi, "$(PREFIX):_GET_$(REQUEST)_STATE") {
     field(DTYP, "asynInt32")
@@ -53,6 +54,21 @@ record(mbbi, "$(PREFIX):$(REQUEST)_STATUS") {
     field(ONST, "running")
     field(TWST, "success")
     field(THST, "fail")
+}
+
+# Whenever the driver reports the request is running, set $(REQUEST)_STATUS
+# to running. We want to handle the driver internally starting the operation
+# without us requesting it.
+record(calcout, "$(PREFIX):_$(REQUEST)_state_changed") {
+    field(INPA, "$(PREFIX):_MONITOR_$(REQUEST)_STATE")
+    field(CALC, "A=2")
+    field(OOPT, "When Non-zero")
+    field(DOPT, "Use OCAL")
+    field(OCAL, "1")
+    field(OUT,  "$(PREFIX):$(REQUEST)_STATUS PP")
+    # This FLNK is necessary on any _MONITOR_$(REQUEST)_STATE update
+    # not just when we updated $(REQUEST)_STATUS here.
+    field(FLNK, "$(PREFIX):_is_$(REQUEST)_done")
 }
 
 # Writing 1 to this record starts the request.
@@ -89,14 +105,14 @@ record(dfanout, "$(PREFIX):_accept_$(REQUEST)") {
 record(calcout, "$(PREFIX):_is_$(REQUEST)_done") {
     field(INPA, "$(PREFIX):$(REQUEST)_STATUS")
     field(INPB, "$(PREFIX):_GET_$(REQUEST)_STATE PP") # get actual state
-    field(INPC, "$(PREFIX):_MONITOR_$(REQUEST)_STATE CPP") # just to process on updates
     field(CALC, "A==1&&B!=2")
     field(OOPT, "When Non-zero")
     field(OUT,  "$(PREFIX):_set_$(REQUEST)_result PP")
 }
 record(calcout, "$(PREFIX):_set_$(REQUEST)_result") {
     field(INPA, "$(PREFIX):_GET_$(REQUEST)_STATE")
-    field(CALC, "A==1?2:3")
+    field(INPB, "$(PREFIX):_START_$(REQUEST).STAT") # check for start write error
+    field(CALC, "(A==1&&B==0)?2:3")
     field(OUT,  "$(PREFIX):$(REQUEST)_STATUS PP")
     field(FLNK, "$(PREFIX):_reset_count_$(REQUEST)")
 }

@@ -6,6 +6,8 @@ as internal PVs meant to be used by driver-specific database code.
 
 For instructions for loading the correct DB files, consult the [main page](@ref index).
 
+The names of all the PVs documented here can be customized (see @ref customizing-pvs).
+
 Most of the records in this section are provided by the database file `TRBase.db`.
 However, channel-specific records (containing `CH<N>` in their name) originate
 from `TRChannel.db` or `TRChannelWaveform.db`.
@@ -25,9 +27,10 @@ of the purpose of the channel.
     <tr>
         <td valign="top">`name` (stringin)</td>
         <td>
-            The statically configured device name.
+            The device name or model.
             
-            It is the value of the `DEVICE_NAME` template parameter passed to `TRBase.db`.
+            It is the value that the driver set using @ref TRBaseDriver::setDigitizerName
+            or the asyn port name if the driver did not call this function.
         </td>
     </tr>
 </table>
@@ -52,6 +55,9 @@ automatically calculated from the desired clock settings.
             `Off` means to disarm after the first burst,
             `On` means the number of bursts is selected by `NUM_BURSTS`.
             The default os `On`.
+            
+            It is possible to customize the ZNAM/ONAM fields by passing the macros
+            `AUTORESTART_ZNAM`/`AUTORESTART_ONAM` to `TRBase.db`.
         </td>
     </tr>
     <tr>
@@ -92,6 +98,8 @@ automatically calculated from the desired clock settings.
             For an example of database code writing this record, see the implementation in the
             General Standards driver (`TRGeneralStandards.db`). There, the value of `_requestedSampleRate`
             is computed based on the records `clock` and `CUSTOM_SAMPLE_RATE`.
+            
+            This record can be excluded by passing `NOCLK=#` to `TRBase.db`.
         </td>
     </tr>
     <tr>
@@ -106,6 +114,8 @@ automatically calculated from the desired clock settings.
             Note that because calculation of the clock configuration may be performed
             asynchronously, this PV is not guaranteed to reflect the new settings immediately
             after the settings are changed.
+            
+            This record can be excluded by passing `NOCLK=#` to `TRBase.db`.
         </td>
     </tr>
 </table>
@@ -204,12 +214,16 @@ and are the same as for the corresponding desired-setting PVs with the addition 
         <td>`GET_ARMED_REQUESTED_SAMPLE_RATE` (ai)</td>
         <td valign="top">
             Current armed requested sample rate; see `_requestedSampleRate`.
+            
+            This record can be excluded by passing `NOCLK=#` to `TRBase.db`.
         </td>
     </tr>
     <tr>
         <td valign="top">`GET_SAMPLE_RATE` (ai)</td>
         <td>
             Current armed achievable sample rate; see `ACHIEVABLE_SAMPLE_RATE`.
+            
+            This record can be excluded by passing `NOCLK=#` to `TRBase.db`.
         </td>
     </tr>
     <tr>
@@ -229,7 +243,12 @@ and are the same as for the corresponding desired-setting PVs with the addition 
 These PVs provide the channel data and additional information about burst processing.
 
 Note that the size (`NELM`) of all waveform records is determined by the value
-of the `SIZE` parameter of associated database templates (`TRBase.db` and `TRChannelWaveforms.db`).
+of the `SIZE` parameter of associated database templates (`TRBase.db` and `TRChannelData.db`).
+
+The data type of the waveforms is determined by the `FTVL` parameter to `TRChannelData.db`
+and is `DOUBLE` by default (if this is changed then `WF_DTYP` also needs to be adjusted).
+However be aware that the digitizer driver determines the data type of NDArrays it submits.
+If the NDArray data type does not match `FTVL`, the StdArrays plugin will convert the data.
 
 <table>
     <tr>
@@ -243,12 +262,15 @@ of the `SIZE` parameter of associated database templates (`TRBase.db` and `TRCha
             
             This PV is updated each second to the number of bursts which have been
             processed in the previous second.
+            
+            It is possible to add custom fields to this record by passing the macro
+            `PERSECOND_FIELDS` to `TRBase.db`.
         </td>
     </tr>
     <tr>
         <td valign="top">`TIME_DATA` (waveform)</td>
         <td>
-            The relative sample time waveform (unit: second).
+            The relative sample time waveform (unit: see `TIME_UNIT_INV`).
             
             This is recalculated whenever the device is armed.
             It will consist of time values for pre-samples (if pre-samples are enabled)
@@ -256,6 +278,25 @@ of the `SIZE` parameter of associated database templates (`TRBase.db` and `TRCha
             the first post-sample time will be 0 and the remaining post-sample times
             will be positive. The difference between subsequent sample times will be
             1/`GET_DISPLAY_SAMPLE_RATE`.
+            However drivers are able to override the calculation of the time array,
+            so the semantics may be different.
+            
+            The `EGU` field of this record corresponds to the macro `TIME_EGU` passed
+            to `TRBase.db`, which is "s" by default if not passed.
+        </td>
+    </tr>
+    <tr>
+        <td valign="top">`TIME_UNIT_INV` (ao)</td>
+        <td>
+            The unit for `TIME_DATA`, as fractions of a second, e.g. 1000 for ms.
+            
+            The initial value is according to the `TIME_UNIT_INV` macro passed
+            to `TRBase.db`, which itself has the default value 1 (second).
+            
+            Changes to this PV during operation will be reflected in new data
+            (newly generated NDArrays). Note that changes do not affect the EGU
+            of the data waveforms, it is your responsibility to keep these in sync
+            if needed.
         </td>
     </tr>
     <tr>
@@ -270,6 +311,9 @@ of the `SIZE` parameter of associated database templates (`TRBase.db` and `TRCha
             While this is not reflected in this waveform record, note that the NDArrays
             generated by the channel ports will be tagged with an attribute `READ_SAMPLE_RATE`
             which will be equal to `GET_DISPLAY_SAMPLE_RATE`.
+            
+            It is possible to define a link to be processed after data is updated,
+            by passing the macro `DATA_UPD_LNK` to `TRChannelData.db`.
         </td>
     </tr>
     <tr>
@@ -280,10 +324,16 @@ of the `SIZE` parameter of associated database templates (`TRBase.db` and `TRCha
             The data and timestamp will match the `CH<N>:DATA` waveform at the time the
             snapshot was made.
             
-            The update rate of slow waveforms is defined by the parameter `REFRESH_SNAPSHOT_SCAN`
-            to the database template `TRChannelWaveforms.db`. Each update period, the update is made
+            The update rate of slow waveforms is defined by the parameter `SNAP_SCAN`
+            to the database template `TRChannelData.db`. Each update period, the update is made
             only if the `DATA` waveform has been updated since the previous time.
             That is, there will be no redundant periodic CA monitor events if there was no new data.
+            
+            It is possible to define a link to be processed after snapshot data is updated,
+            by passing the macro `SNAP_UPD_LNK` to `TRChannelData.db`.
+            
+            These snapshot records can be disabled by passing the macro `SNAPSHOT=#` to
+            `TRChannelData.db`.
         </td>
     </tr>
     <tr>
@@ -297,6 +347,11 @@ of the `SIZE` parameter of associated database templates (`TRBase.db` and `TRCha
             up to 2<sup>31</sup>-1, after which point it will wrap back to zero.
             The expectation is also that the ID is not reset to zero when arming
             again.
+            
+            It is possible to specify a database link to be processed on each
+            new burst, by passing the macro `LNK_NEW_BURST` to `TRBase.db`. This link
+            would be processed after framework PVs with burst information are updated
+            (e.g. `GET_LAST_BURST_TIME`).
         </td>
     </tr>
     <tr>
@@ -304,8 +359,9 @@ of the `SIZE` parameter of associated database templates (`TRBase.db` and `TRCha
         <td>
             The time-and-date string of the last processed burst, based on the burst timestamp.
             
-            The format of the timestamp is (as understood by the EPICS Soft Timestamp device support):
-            `%Y-%m-%d %H:%M:%S.%06f`
+            The format of the timestamp is according to the `TIMESTAMP_FMT` macro passed
+            to `TRBase.db` (as understood by the EPICS Soft Timestamp device support).
+            If the macro is not passed the default is `%Y-%m-%d %H:%M:%S.%06f`.
         </td>
     </tr>
     <tr>

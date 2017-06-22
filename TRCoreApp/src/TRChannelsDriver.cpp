@@ -35,14 +35,17 @@ TRChannelsDriver::TRChannelsDriver (TRChannelsDriverConfig const &cfg)
 {
     // Create asyn parameters.
     createParam("UPDATE_ARRAYS", asynParamInt32, &m_asyn_params[UPDATE_ARRAYS]);
+
+    // Query base driver whether to update pArrays.
+    int updateArraysDefault = (int)cfg.base_driver.m_update_arrays;
     
     int num_channels = cfg.base_driver.m_num_channels;
     for (int channel = 0; channel < num_channels; channel++) {
         // Enable callbacks by default.
         setIntegerParam(channel, NDArrayCallbacks, 1);
         
-        // Enable pArrays updates by default.
-        setIntegerParam(channel, m_asyn_params[UPDATE_ARRAYS], 1);
+        // Apply default pArrays update policy.
+        setIntegerParam(channel, m_asyn_params[UPDATE_ARRAYS], updateArraysDefault);
     }
 }
 

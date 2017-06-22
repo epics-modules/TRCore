@@ -112,6 +112,19 @@ public:
     }
     
     /**
+     * Like @ref getSnapshot but does not have any asserts.
+     * 
+     * This is recommended when performance is important and especially
+     * in interrupt context.
+     * 
+     * @return The current snapshot value.
+     */
+    inline ValueType getSnapshotFast ()
+    {
+        return m_snapshot_value;
+    }
+    
+    /**
      * Mark this parameter as irrelevant for the current configuration.
      * 
      * The intended use of this is in TRBaseDriver::checkSettings to inform
@@ -184,12 +197,23 @@ public:
      */
     void setDesired (ValueType value);
     
-private: // for TRBaseDriver
+    /**
+     * Return the asyn parameter index of the desired-value parameter.
+     * 
+     * This can be used in overridden parameter write functions to determine when the
+     * desired value is being changed. There is currently only one foreseen use case,
+     * when the driver wishes to apply configuration changes immediately while not
+     * armed. See @ref TRBaseDriver::onDisarmed for instructions to do this correctly.
+     * 
+     * @return The asyn parameter index of the desired-value parameter.
+     */
     inline int desiredParamIndex ()
     {
+        assert(m_initialized);
+        
         return m_desired_param;
     }
-
+    
 private:
     void init (TRBaseDriver *driver, char const *base_name, EffectiveValueType invalid_value, bool internal);
     void setEffectiveParam (EffectiveValueType value);

@@ -39,11 +39,14 @@ public:
     : num_channels(0),
       num_config_params(0),
       num_asyn_params(0),
+      interface_mask(0),
+      interrupt_mask(0),
       read_thread_prio(0),
       read_thread_stack_size(0),
       max_ad_buffers(0),
       max_ad_memory(0),
-      supports_pre_samples(false)
+      supports_pre_samples(false),
+      update_arrays(true)
     {
     }
     
@@ -81,6 +84,24 @@ public:
     int num_asyn_params;
     
     /**
+     * Mask of asyn interface types for asyn parameters of the derived
+     * class.
+     * 
+     * This is OR'd with the types needed by TRBaseDriver and forwarded
+     * to the asynPortDriver constructor.
+     */
+    int interface_mask;
+    
+    /**
+     * Mask of asyn interface types for asyn parameters of the derived
+     * class which might use asynchronous notification.
+     * 
+     * This is OR'd with the types needed by TRBaseDriver and forwarded
+     * to the asynPortDriver constructor.
+     */
+    int interrupt_mask;
+    
+    /**
      * Priority for the read thread, in EPICS units.
      * 
      * The default is 0.
@@ -115,6 +136,14 @@ public:
      * The default is false.
      */
     bool supports_pre_samples;
+    
+    /**
+     * Whether copies of submitted NDArrays are kept in the TRChannelsDriver.
+     * 
+     * This is used as the initial value of the UPDATE_ARRAYS parameters in
+     * TRChannelsDriver for all channels (port addresses). The default is true.
+     */
+    bool update_arrays;
     
     /**
      * Helper function for setting parameters using chaining.

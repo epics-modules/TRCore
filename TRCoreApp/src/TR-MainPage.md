@@ -215,19 +215,75 @@ after constructing the driver.
 
 In order to bring channel data to waveform records, the standard AreaDetector StdArrays plugins
 need to be used, one for each channel.
-The framework provides a database template for this (`TRChannelWaveforms.db`, see below),
+The framework provides a database template for this (`TRChannelData.db`, see below),
 but the StdArrays plugins need to be initialized manually.
 
 # Database Templates     {#database-templates}
+
+## TRBase.db
 
 The database template `TRBase.db` defines the common records corresponding to
 functions implemented by @ref TRBaseDriver.
 This template requires the following macros:
 - `PREFIX`: Prefix of records (a colon after the prefix is implied).
 - `PORT`: Port name of the driver based on TRBaseDriver.
-- `DEVICE_NAME`: Arbitrary device name for the `name` record.
 - `SIZE` - Waveform size (NELM) for the time array.
-- `PRESAMPLES` - "#" if presamples are not supported, empty if supported
+- `PRESAMPLES` - `#` if presamples are not supported, empty if supported
+
+Optional macros are:
+- `TIME_UNIT_INV`: The unit for the time array, as fractions of a second,
+  e.g. 1000 for ms (default: 1 - second).
+- `TIME_EGU`: EGU field for `TIME_DATA` (default: "s"). Should correspond
+  to `TIME_UNIT_INV`.
+- `TIMESTAMP_FMT`: Timestamp format for `GET_LAST_BURST_TIME`
+   (default: `%Y-%m-%d %H:%M:%S.%06f`).
+- `PERSECOND_FIELDS`: Extra fields for perSecond record (default: empty).
+- `AUTORESTART_ZNAM`: ZNAM for autoRestart record (default: Off).
+- `AUTORESTART_ONAM`: ONAM for autoRestart record (default: On).
+- `LNK_NEW_BURST`: Link to process after information for a new burst
+                   is available (default: empty).
+- `NOCLK`: Set to "#" to disable sample rate configuration records
+           (default: empty - enabled).
+
+The following optional macros can be used to set the default values of
+configuration parameters: `DEFAULT_AUTORESTART`, `DEFAULT_NUM_BURSTS`,
+`DEFAULT_NUM_PTS`, `DEFAULT_NUM_PPS`.
+
+## TRChannel.db
+
+The database template `TRChannel.db` provides channel-specific configuration records
+supported by the class @ref TRChannelsDriver.
+It requires the following macros:
+- `PREFIX`: Prefix of records (a colon is implied), this should include identification of the channel.
+- `CHANNELS_PORT`: Port name of the channels driver. This is the name of the base
+  driver with the suffix `_channels`.
+- `CHANNEL`: Channel number (asyn address for TRChannelsDriver).
+
+## TRChannelData.db
+
+The database template `TRChannelData.db` provides waveform records for channel data,
+relying on the AreaDetector StdArrays plugin.
+It requires the following macros:
+- `PREFIX`: Prefix of records (a colon is implied), this should include identification of the channel.
+- `STDAR_PORT`: Name of the stdarrays port for the channel.
+- `SIZE`: Waveform size (NELM).
+- `SNAP_SCAN`: SCAN rate for updating the data snapshot (e.g. "1 second").
+  Needed only if `SNAPSHOT` is enabled which is the default.
+
+Optional macros are:
+- `FTVL`: Waveform data type (FTVL) (default: DOUBLE).
+- `WF_DTYP`: Device support type for the data waveform, must correspond to `FTVL`
+  (default: asynFloat64ArrayIn).
+- `TIMESTAMP_FMT`: Timestamp format for `DATA_TIMESTAMP` and `DATA_SNAPSHOT_TIMESTAMP`
+  if enabled (default: `%Y-%m-%d %H:%M:%S.%06f`).
+- `SNAPSHOT`: Set to `#` to disable data snapshot (default: empty - enabled).
+- `TIMESTAMP`: Set to empty to disable timestamp records (default: # - disabled).
+- `DATA_UPD_LNK`: Record to process when the data waveform is updated
+  (default: empty).
+- `SNAP_UPD_LNK`: Record to process when the snapshot waveform is updated
+  (default: empty).
+
+## Driver-specific DB templates
 
 Each driver will need to provide one or more database templates of its own,
 supporting configuration parameters and other functions specific to the driver.
@@ -239,24 +295,8 @@ The asyn parameter names of these will based on the base parameter name,
 by prepending the prefix `DESIRED_` or `EFFECTIVE_`.
 The records in `TRBase.db` can be used as an example.
 
-The database template `TRChannel.db` provides channel-specific configuration records
-supported by the class @ref TRChannelsDriver.
-It requires the following macros:
-- `PREFIX`: Prefix of records (a colon is implied), this should include identification of the channel.
-- `CHANNELS_PORT`: Port name of the channels driver. This is the name of the base
-  driver with the suffix `_channels`.
-- `CHANNEL`: Channel number (asyn address for TRChannelsDriver).
-
-The database template `TRChannelWaveforms.db` provides waveform records for channel data,
-relying on the AreaDetector StdArrays plugin.
-It requires the following macros:
-- `PREFIX`: Prefix of records (a colon is implied), this should include identification of the channel.
-- `STDARRAYS_PORT`: Name of the stdarrays port for the channel.
-- `SIZE`: Waveform size (NELM).
-- `REFRESH_SNAPSHOT_SCAN`: SCAN rate for updating the data snapshot (e.g. "1 second").
-
 # List of PVs
 
 - @ref framework-pvs
 - @ref genstds-pvs
-
+- @ref sis3302-driver
